@@ -243,17 +243,29 @@ async function run() {
     });
 
     // Add New Card
-    app.put("/usersProgress/:userEmail", async (req, res) => {
+    app.put("/addNewCard/:userEmail", async (req, res) => {
       const filter = {
-        email: req.params.userEmail,
+        email: req.body.email,
       };
 
       const userProgressData = await usersProgressCollection.findOne(filter);
 
       userProgressData.userProgress.forEach((item) => {
         if (item.title === req.body.cardState) {
+          console.log("inner adding");
+          const date = new Date();
+          const hour = new Date().getHours();
+          const minute = new Date().getMinutes();
+          const second = new Date().getSeconds();
+          const uniqueId = createHash(
+            "sha256",
+            `${date}${hour}${minute}${second}`
+          )
+            .update(`${date}${hour}${minute}${second}`)
+            .digest("hex");
+
           const newCard = {
-            id: item.tasks.length + 1,
+            id: uniqueId,
             title: req.body.cardTitle,
             date: new Date().toISOString().split("T")[0],
             type: req.body.cardType,
@@ -299,6 +311,38 @@ async function run() {
       res.send(updateProgress);
     });
 
+    // Delete Single Card
+    app.put("/deleteSingleCard/:userEmail", async (req, res) => {
+      const findProgress = {
+        email: req.body.email,
+      };
+
+      const progressData = await usersProgressCollection.findOne(findProgress);
+      if (progressData) {
+        progressData.userProgress.forEach((item) => {
+          if (item.id === req.body.stateId) {
+            console.log("all tasks", item);
+            const updateTasks = item.tasks.filter(
+              (task) => task.id !== req.body.id
+            );
+            item.tasks = updateTasks;
+          }
+        });
+      }
+
+      const updateDoc = {
+        $set: {
+          userProgress: progressData.userProgress,
+        },
+      };
+
+      const updateProgress = await usersProgressCollection.updateOne(
+        findProgress,
+        updateDoc
+      );
+      res.send(updateProgress);
+    });
+
     // Delete user progress
     app.delete("/deleteUserProgress/:userEmail", async (req, res) => {
       const query = {
@@ -308,6 +352,84 @@ async function run() {
       const user = await usersProgressCollection.deleteOne(query);
       if (user) {
         res.send(user);
+      }
+    });
+
+    // Comment on userProgress
+    // Add Comment
+    app.put("/addProgressComment/:userEmail", async (req, res) => {
+      const filter = {
+        email: req.body.email,
+      };
+
+      const userProgressData = await usersProgressCollection.findOne(filter);
+
+      userProgressData.userProgress.forEach((item) => {
+        if (item.title === req.body.cardState) {
+          item.tasks.forEach((singleTask, commentIndex) => {
+            if (singleTask.id === req.body.cardId) {
+              if (!singleTask.discussion) {
+                singleTask.discussion = [];
+              }
+              if (singleTask.discussion) {
+                const date = new Date();
+                const hour = new Date().getHours();
+                const minute = new Date().getMinutes();
+                const second = new Date().getSeconds();
+                const uniqueId = createHash(
+                  "sha256",
+                  `${date}${hour}${minute}${second}${req.body.newComment}${singleTask.discussion.length}`
+                )
+                  .update(`${date}${hour}${minute}${second}`)
+                  .digest("hex");
+                if (req.body.parentCommentId) {
+                  singleTask.discussion.forEach((singleComment) => {
+                    if (singleComment.commentId === req.body.parentCommentId) {
+                      const replyComment = {
+                        reply: req.body.replyComment,
+                        date: new Date().toISOString().split("T")[0],
+                        replyId: uniqueId,
+                        replierName: req.body.commenterName,
+                        replierEmail: req.body.commenterEmail,
+                      };
+                      console.log(
+                        singleTask.replies,
+                        "now single task replies"
+                      );
+                      singleComment.replies.push(replyComment);
+                    }
+                  });
+                } else {
+                  const newComment = {
+                    comment: req.body.newComment,
+                    date: new Date().toISOString().split("T")[0],
+                    commentId: uniqueId,
+                    commenterName: req.body.commenterName,
+                    commenterEmail: req.body.commenterEmail,
+                    replies: [],
+                  };
+
+                  singleTask.discussion.push(newComment);
+                }
+              }
+            }
+          });
+        }
+      });
+
+      const updateDoc = {
+        $set: {
+          userProgress: userProgressData.userProgress,
+        },
+      };
+
+      const updateProgress = await usersProgressCollection.updateOne(
+        filter,
+        updateDoc
+      );
+      if (updateProgress) {
+        updateProgress.message = "Comment published!";
+        res.send(updateProgress);
       }
     });
     // End Users Progress
